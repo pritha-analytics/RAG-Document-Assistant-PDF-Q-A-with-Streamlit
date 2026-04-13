@@ -23,10 +23,10 @@ if not os.environ["OPENAI_API_KEY"]:
 # Config
 # ─────────────────────────────────────────
 
-DATA_DIR = "./data"
-CHROMA_DIR = "./chroma_db"
-TOP_K = 5
-SIMILARITY_THRESHOLD = 0.6  # 🔥 important
+DATA_DIR = "./data"          # where my PDFs live
+CHROMA_DIR = "./chroma_db"   # where embeddings are saved on disk
+TOP_K = 5                    # retrieve top 5 most similar chunks
+SIMILARITY_THRESHOLD = 0.6   # filter out irrelevant chunks
 
 # ─────────────────────────────────────────
 # LLM
@@ -37,6 +37,7 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 # ─────────────────────────────────────────
 # Build Vector Store
 # ─────────────────────────────────────────
+# PDFs → Load pages → Split into chunks → Embed each chunk → Save to Chroma
 
 def build_vectorstore():
     embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
@@ -46,7 +47,10 @@ def build_vectorstore():
         return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
 
     print("Building vector store...")
-
+# ─────────────────────────────────────────
+#  Load PDFs
+# ─────────────────────────────────────────
+    
     loader = PyPDFDirectoryLoader(DATA_DIR)
     docs = loader.load()
 
@@ -54,6 +58,10 @@ def build_vectorstore():
         raise ValueError("No PDFs found in ./data")
 
     print(f"Loaded {len(docs)} pages")
+
+# ─────────────────────────────────────────
+#  Split into chunks
+# ─────────────────────────────────────────
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=400,
@@ -63,13 +71,19 @@ def build_vectorstore():
     chunks = splitter.split_documents(docs)
     print(f"Created {len(chunks)} chunks")
 
+# ─────────────────────────────────────────
+#  Embed and store
+# ─────────────────────────────────────────
+
     db = Chroma.from_documents(chunks, embeddings, persist_directory=CHROMA_DIR)
     db.persist()
 
     return db
 
 # ─────────────────────────────────────────
-# RAG Pipeline
+# RAG Pipeline 
+
+  Question → Expand query → Retrieve chunks → Filter by score → Build context → LLM answers
 # ─────────────────────────────────────────
 
 def rag(query, vectorstore):
@@ -77,17 +91,18 @@ def rag(query, vectorstore):
     print(f"Question: {query}")
     print('='*60)
 
-    # 🔥 Query expansion (helps retrieval)
+    # Query expansion (helps retrieval)
     expanded_query = f"{query} context document details explanation"
 
+    #Retrieve top-K chunks
     print("\n[Step 1] Retrieving documents...")
-    results = vectorstore.similarity_search_with_score(expanded_query, k=TOP_K)
+    results = vectorstore.similarity_search_with_score(expanded_query, k=TOP_K)   
 
     # Debug scores
     for i, (doc, score) in enumerate(results):
         print(f"Chunk {i+1} score: {round(score, 3)}")
 
-    # 🔥 Filter irrelevant chunks
+    # Filter irrelevant chunks
     filtered = [(doc, score) for doc, score in results if score < SIMILARITY_THRESHOLD]
 
     if not filtered:
@@ -112,6 +127,7 @@ def rag(query, vectorstore):
     # Generate answer
     print("\n[Step 3] Generating answer...")
 
+    # Build the prompt
     prompt = f"""
     You MUST answer using ONLY the context below.
     If the answer is not present, say: "I don't know."
@@ -123,7 +139,7 @@ def rag(query, vectorstore):
 
     Answer:
     """
-
+  # Get answer
     answer = llm.invoke(prompt).content.strip()
 
     return {
@@ -157,6 +173,7 @@ if __name__ == "__main__":
 
     print("\n✅ RAG ready. Ask a question (type 'quit' to exit)\n")
 
+    # The Main Loop
     while True:
         q = input("Question: ").strip()
 
