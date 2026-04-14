@@ -1,5 +1,5 @@
 """
-Proper RAG Application — Clean & Robust Version
+Proper RAG Application 
 """
 
 import os
